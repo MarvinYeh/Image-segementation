@@ -16,34 +16,34 @@ tf.logging.set_verbosity(tf.logging.INFO)
 
 
 def BRW_block(input_node, iteration, in_channel, init_downsample=True):
-    """BN-Relu-Weights(1*1,3*3,1*1) [pre-activation]: https://arxiv.org/pdf/1603.05027.pdf"""
+    """BN-Relu-Weights(1*1,3*3,1*1) [full pre-activation]: https://arxiv.org/pdf/1603.05027.pdf
+    init_downsample was added because in the first conv2 block, no downsmaple was used"""
     x = input_node
 
     for n in range(iteration):
-        for m in range(2):
-            x = tf.layers.batch_normalization(x, axis=-1, momentum=0.99)
-            x = tf.nn.relu(x)
-            if n == 0 and m == 0:  # stride 2 for down-size in the first convolution of each layer
-                if init_downsample is True:  # for layers other than conv2_, where downsample is not required
-                    x = tf.layers.conv2d(x, in_channel, (1, 1), strides=2, padding='same',
-                                         kernel_initializer=tf.contrib.layers.xavier_initializer())
-                    shortcut = tf.layers.conv2d(input_node, in_channel * 4, (1, 1), strides=2, padding='same')
-                else:
-                    x = tf.layers.conv2d(x, in_channel, (1, 1), padding='same',
-                                         kernel_initializer=tf.contrib.layers.xavier_initializer())
-                    shortcut = tf.layers.conv2d(input_node, in_channel * 4, (1, 1), strides=1, padding='same')
-            else:
-                x = tf.layers.conv2d(x, in_channel, (1, 1), padding='same',
-                                     kernel_initializer=tf.contrib.layers.xavier_initializer())
+        shortcut = x
+        x = tf.layers.batch_normalization(x, axis=-1, momentum=0.99)
+        x = tf.nn.relu(x)
+        if init_downsample is True:  # for layers other than conv2_, where downsample is not required
+            shortcut = tf.layers.conv2d(input_node, in_channel * 4, (1, 1), strides=2, padding='same')
+            x = tf.layers.conv2d(x, in_channel, (1, 1), strides=2, padding='same',
+                                 kernel_initializer=tf.contrib.layers.xavier_initializer())
+        else:
+            x = tf.layers.conv2d(x, in_channel, (1, 1), padding='same',
+                                 kernel_initializer=tf.contrib.layers.xavier_initializer())
+            init_downsample= False # only downsample once
 
-            x = tf.layers.conv2d(x, in_channel, (3, 3), padding='same',
-                                 kernel_initializer=tf.contrib.layers.xavier_initializer())
-            x = tf.layers.conv2d(x, in_channel * 4, (1, 1), padding='same',
-                                 kernel_initializer=tf.contrib.layers.xavier_initializer())
+        x = tf.layers.batch_normalization(x, axis=-1, momentum=0.99)
+        x = tf.nn.relu(x)
+        x = tf.layers.conv2d(x, in_channel, (3, 3), padding='same',
+                             kernel_initializer=tf.contrib.layers.xavier_initializer())
+        x = tf.layers.batch_normalization(x, axis=-1, momentum=0.99)
+        x = tf.nn.relu(x)
+        x = tf.layers.conv2d(x, in_channel * 4, (1, 1), padding='same',
+                             kernel_initializer=tf.contrib.layers.xavier_initializer())
 
         # add residual
         x = x + shortcut
-        shortcut = x
     return x
 
 
@@ -99,12 +99,11 @@ class ResUnet(object):
         # second layer 3*3 maxpool and conv2_x--> output (-1,160,160,256)
         with tf.variable_scope('CONV2'):
             conv2mp = tf.layers.max_pooling2d(self.conv1, 3, 2, 'same')
-            self.conv2 = BRW_block(conv2mp, 1, self.feature_root,
+            self.conv2 = BRW_block(conv2mp, 3, self.feature_root,
                                    init_downsample=False)  # note the output will be 4*in_channel in each block
 
         with tf.variable_scope('CONV3'):  # -->(-1,80,80,512)
-            self.conv3 = BRW_block(self.conv2, 4, self.feature_root * 2 ** 1,
-                                   init_downsample=True)
+            self.conv3 = BRW_block(self.conv2, 4, self.feature_root * 2 ** 1)
 
         with tf.variable_scope('CONV4'):  # -->(-1,40,40,1024)
             self.conv4 = BRW_block(self.conv3, 6, self.feature_root * 2 ** 2)
@@ -132,7 +131,7 @@ class ResUnet(object):
             self.x = tf.nn.relu(self.x)
             self.output = tf.layers.conv2d(self.x, n_class, 3, strides=(1, 1), padding='same')
 
-    def train(self, img, optimizer='adam', loss='dice_coeff', lr=0.01):
+    def train(self, optimizer='adam', loss='dice_coeff', lr=0.01):
         self.sess = tf.Session()
         self.sess.run(tf.global_variables_initializer())
         saver = tf.train.Saver(max_to_keep=4)
