@@ -179,7 +179,7 @@ if __name__ == '__main__':
             _, loss =  unet.sess.run([unet.train_op, unet.loss],{unet.tfx:feed_in(img),unet.tfy:feed_in(b_y)})
             loss_history.append(loss)
 
-            if n % 10 == 0
+            if n % 10 == 0:
                 v_loss = unet.sess.run(unet.loss,{unet.tfx:feed_in(test_x), unet.tfy:feed_in(test_y)})
                 print('loss:%.4f| val:%.4f'.format(np.mean(loss_history),np.mean(v_loss)))
 
